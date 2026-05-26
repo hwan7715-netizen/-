@@ -13,27 +13,13 @@ st.markdown("""
     html, body, [class*="css"] {
         font-family: 'Pretendard', sans-serif !important;
     }
-    .report-box {
-        background-color: #f8f9fa;
-        padding: 20px;
-        border-radius: 10px;
-        border: 1px solid #e9ecef;
-    }
-    a {
-        color: #1E88E5 !important;
-        text-decoration: none;
-        font-weight: 500;
-    }
-    a:hover {
-        text-decoration: underline;
-    }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("📊 AI 퀀트 주식 분석 대시보드")
+st.title("📊 주식 분석 대시보드")
 st.markdown("---")
 
-# 2. 상태 저장소(Session State) 초기화
+# 2. 상태 저장소 초기화
 if 'saved_reports' not in st.session_state:
     st.session_state.saved_reports = {}
 if 'current_view' not in st.session_state:
@@ -45,12 +31,12 @@ api_key = st.text_input("발급받은 Gemini API 키를 입력하세요:", type=
 
 # 3. 사이드바: 내 관심 종목 저장소
 with st.sidebar:
-    st.header("📁 내 관심 종목")
-    st.write("분석한 종목은 브라우저를 닫기 전까지 이곳에 임시 저장됩니다.")
+    st.header("📁 내 관심 종목 보관함")
+    st.write("분석한 종목은 브라우저를 닫기 전까지 이곳에 자동 저장됩니다.")
     
     if st.session_state.saved_reports:
         for saved_ticker, data in st.session_state.saved_reports.items():
-            st.markdown(f"**{saved_ticker}** (최근: {data['time'][11:16]})")
+            st.markdown(f"**{saved_ticker}** (최근 분석: {data['time'][11:16]})")
             
             col_view, col_refresh = st.columns(2)
             with col_view:
@@ -63,10 +49,10 @@ with st.sidebar:
                     st.session_state.force_refresh = True
             st.markdown("---")
     else:
-        st.info("저장된 종목이 없습니다.")
+        st.info("아직 저장된 종목이 없습니다.")
 
 # 4. 메인 검색창 및 실행
-ticker_input = st.text_input("분석할 미국 주식 티커 (예: AAPL, TSLA):").upper()
+ticker_input = st.text_input("분석할 미국 주식 티커 (예: AAPL, TSLA, NVDA):").upper()
 
 if st.button("새 종목 분석 시작"):
     if ticker_input:
@@ -78,18 +64,19 @@ force_refresh = st.session_state.force_refresh
 
 # 5. 분석 및 화면 출력 로직
 if target_ticker:
+    # 이미 저장된 데이터가 있고 갱신 요청이 아닐 때 (캐시 불러오기)
     if target_ticker in st.session_state.saved_reports and not force_refresh:
-        st.success(f"📌 저장된 {target_ticker} 데이터를 불러왔습니다. ({st.session_state.saved_reports[target_ticker]['time']})")
+        st.success(f"📌 임시 보관함에서 {target_ticker} 데이터를 불러왔습니다. (데이터 기준: {st.session_state.saved_reports[target_ticker]['time']})")
         report_data = st.session_state.saved_reports[target_ticker]
         
         # 핵심 지표 출력
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("현재 주가", f"${report_data['price']:.2f}")
-        col2.metric("PER", report_data['pe'])
+        col2.metric("PER (주가수익비율)", report_data['pe'])
         col3.metric("20일 이동평균", f"${report_data['ma20']:.2f}")
         col4.metric("RSI (투자심리)", f"{report_data['rsi']:.1f}")
         
-        # 차트 2개 나란히 출력 (주가 차트 + RSI 속도계)
+        # 차트 2개 나란히 출력
         st.markdown("<br>", unsafe_allow_html=True)
         chart_col1, chart_col2 = st.columns(2)
         with chart_col1:
@@ -103,37 +90,34 @@ if target_ticker:
         
         with news_col:
             st.subheader("📰 최근 주요 뉴스")
-            news_html = "<ul>"
             for news in report_data['news']:
-                news_html += f"<li style='margin-bottom:10px;'><a href='{news['link']}' target='_blank'>{news['title']}</a></li>"
-            news_html += "</ul>"
-            st.markdown(news_html, unsafe_allow_html=True)
+                st.markdown(f"- [{news['title']}]({news['link']})")
             
         with report_col:
-            st.subheader("🤖 AI 퀀트 심층 보고서")
-            st.markdown(f"<div class='report-box'>{report_data['ai_report']}</div>", unsafe_allow_html=True)
+            st.subheader("🤖 AI 보고서")
+            with st.container(border=True): # 깔끔한 테두리 박스 적용
+                st.write(report_data['ai_report'])
 
+    # 새로 API를 호출하여 분석해야 할 때
     else:
         if not api_key:
             st.warning("API 키를 입력해 주세요.")
         else:
             try:
-                st.info(f"{target_ticker} 데이터를 수집하고 AI를 호출합니다...")
+                st.info(f"{target_ticker} 실시간 데이터를 수집하고 AI 분석을 진행합니다. 잠시만 기다려주세요...")
                 time.sleep(0.5)
                 stock = yf.Ticker(target_ticker)
                 hist = stock.history(period="3mo")
                 
                 if hist.empty:
-                    st.error("데이터를 가져오지 못했습니다. 티커를 확인해 주세요.")
+                    st.error("데이터를 가져오지 못했습니다. 티커를 정확히 입력했는지 확인해 주세요.")
                 else:
                     current_price = hist['Close'].iloc[-1]
                     info = stock.info
                     
-                    # [버그 수정 1] PER 데이터 유연한 추출
                     pe_raw = info.get('trailingPE', info.get('forwardPE'))
                     pe_ratio = f"{pe_raw:.2f}" if pe_raw else "N/A"
                     
-                    # 퀀트 지표
                     ma20 = hist['Close'].rolling(window=20).mean().iloc[-1]
                     delta = hist['Close'].diff()
                     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
@@ -142,24 +126,31 @@ if target_ticker:
                     rsi = 100 - (100 / (1 + rs))
                     current_rsi = rsi.iloc[-1]
                     
-                    # [버그 수정 2] 뉴스 수집 및 절대 경로화
+                    # [버그 수정 1] 절대 실패하지 않는 뉴스 링크 조립 로직
                     news_list = stock.news
                     news_data_for_ui = [] 
                     if news_list:
                         for news in news_list[:5]:
                             title = "뉴스 제목 없음"
-                            link = news.get('link', '#')
+                            link = news.get('link', '')
+                            
                             if 'title' in news: title = news['title']
                             elif 'content' in news and 'title' in news['content']: 
                                 title = news['content']['title']
                                 if 'link' in news['content']: link = news['content']['link']
                             
-                            if link != '#' and not link.startswith('http'):
-                                link = f"https://finance.yahoo.com{link}"
+                            # 링크가 비정상적일 경우 완벽한 절대 주소로 강제 변환
+                            if not link.startswith('http'):
+                                if link.startswith('/'):
+                                    link = f"https://finance.yahoo.com{link}"
+                                else:
+                                    link = f"https://finance.yahoo.com/quote/{target_ticker}/news"
+                                    
                             news_data_for_ui.append({"title": title, "link": link})
+                            
                     raw_headlines_text = "\n".join([f"- {n['title']}" for n in news_data_for_ui])
                     
-                    # [기능 부활] 주가 흐름 라인 차트 생성 (Plotly)
+                    # 라인 차트 생성
                     line_fig = go.Figure()
                     line_fig.add_trace(go.Scatter(x=hist.index, y=hist['Close'], mode='lines', name='주가', line=dict(color='#1E88E5', width=2)))
                     line_fig.update_layout(title="📈 최근 3개월 주가 흐름", margin=dict(l=0, r=0, t=40, b=0), font=dict(family="Pretendard"), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
@@ -178,28 +169,32 @@ if target_ticker:
                     ))
                     gauge_fig.update_layout(margin=dict(l=20, r=20, t=40, b=20), font=dict(family="Pretendard"))
                     
-                    # [가독성 개선] AI 프롬프트 재설계 (엄격한 양식 제한)
+                    # [버그 수정 2] 내용의 깊이를 살린 심층 프롬프트
                     genai.configure(api_key=api_key)
                     model_name = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods][0]
                     model = genai.GenerativeModel(model_name)
                     
                     prompt = f"""
-                    너는 데이터 기반의 월스트리트 수석 퀀트 애널리스트야.
+                    너는 월스트리트 최고의 시니어 퀀트 애널리스트야.
                     [실제 데이터] 종목: {target_ticker} / 현재가: ${current_price:.2f} / 20일 이평선: ${ma20:.2f} / RSI: {current_rsi:.1f}
                     [최근 뉴스]: {raw_headlines_text}
 
-                    위 데이터를 분석하여 아래 양식에 맞춰 '반드시 글머리 기호(-)'를 사용해 간결하고 명확하게 작성해:
+                    위 데이터를 종합하여 초보자도 이해하기 쉽지만, 내용의 깊이가 있는 전문가 수준의 투자 리포트를 작성해.
+                    가독성을 위해 반드시 아래의 양식과 [글머리 기호(-)]를 사용하여 구조화된 형태로 작성할 것. (절대 줄글로 대충 쓰지 마)
 
-                    ### 1. 📈 기술적 분석 및 예측
-                    - (이동평균선과 RSI를 기반으로 한 주가 방향성 분석 2줄)
-                    
-                    ### 2. 🌡️ 펀더멘털 및 시장 감성
-                    - (뉴스를 바탕으로 한 호재/악재 판별 및 요약 2줄)
+                    ### 1. 📈 기술적 지표 심층 분석
+                    - 20일 이동평균선과 현재가를 비교하여 현재 추세의 강도와 지지/저항선을 상세히 분석해.
+                    - RSI 수치를 바탕으로 현재 매수/매도 압력이 어떤지, 단기 변동성이 어떻게 될지 예측해.
 
-                    ### 3. 💡 최종 투자 전략
-                    - **목표 매수가:** $000
-                    - **목표 매도가:** $000
-                    - **핵심 요약:** (현재 상황에 대한 전문가의 1줄 평)
+                    ### 2. 🌡️ 펀더멘털 및 시장 모멘텀
+                    - 제공된 최신 뉴스를 종합하여 현재 시장이 이 기업을 어떻게 평가하고 있는지 분석해.
+                    - 단기적인 호재/악재를 명확히 판별하고 향후 예상되는 주가 촉매제(Catalyst)를 적어줘.
+
+                    ### 3. 🎯 월스트리트 AI 최종 투자 전략
+                    - **전략 방향:** (적극 매수 / 분할 매수 / 관망 / 분할 매도 / 적극 매도 중 1개 선택)
+                    - **목표 매수가:** $000 ~ $000 (구체적인 진입 권장 구간)
+                    - **목표 매도가:** $000 ~ $000 (구체적인 청산 권장 구간)
+                    - **핵심 요약:** (현재 상황에 대한 전문가의 통찰력 있는 1~2줄 평)
                     """
                     
                     response = model.generate_content(prompt)
@@ -219,40 +214,9 @@ if target_ticker:
                         'ai_report': ai_report
                     }
                     
-                    # 화면 출력
-                    col1, col2, col3, col4 = st.columns(4)
-                    col1.metric("현재 주가", f"${current_price:.2f}")
-                    col2.metric("PER", pe_ratio)
-                    col3.metric("20일 이동평균", f"${ma20:.2f}")
-                    col4.metric("RSI (투자심리)", f"{current_rsi:.1f}")
-                    
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    chart_col1, chart_col2 = st.columns(2)
-                    with chart_col1:
-                        st.plotly_chart(line_fig, use_container_width=True)
-                    with chart_col2:
-                        st.plotly_chart(gauge_fig, use_container_width=True)
-                    
-                    st.markdown("---")
-                    news_col, report_col = st.columns([1, 2])
-                    
-                    with news_col:
-                        st.subheader("📰 최근 주요 뉴스")
-                        news_html = "<ul>"
-                        for news in news_data_for_ui:
-                            # [버그 수정 3] HTML 태그로 외부 링크 강제 열기 (target='_blank')
-                            news_html += f"<li style='margin-bottom:10px;'><a href='{news['link']}' target='_blank'>{news['title']}</a></li>"
-                        news_html += "</ul>"
-                        st.markdown(news_html, unsafe_allow_html=True)
-                        
-                    with report_col:
-                        st.subheader("🤖 AI 퀀트 심층 보고서")
-                        # CSS 클래스 적용으로 전문적인 박스 디자인
-                        st.markdown(f"<div class='report-box'>{ai_report}</div>", unsafe_allow_html=True)
-                        
-                    st.success(f"분석 완료! 사이드바에 저장되었습니다.")
+                    # [버그 수정 3] 저장이 끝나면 화면을 즉시 새로고침하여 사이드바에 즉시 반영
+                    st.session_state.force_refresh = False
+                    st.rerun()
 
             except Exception as e:
                 st.error(f"오류 발생: {e}")
-
-st.session_state.force_refresh = False
