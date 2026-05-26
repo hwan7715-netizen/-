@@ -4,7 +4,7 @@ import google.generativeai as genai
 
 # 웹사이트를 넓게 쓰도록 대시보드 형태로 설정
 st.set_page_config(layout="wide") 
-st.title("📊 AI 퀀트 주식 대시보드 (Pro 버전)")
+st.title("📊 주식 분석 대시보드")
 st.markdown("---")
 
 api_key = st.text_input("발급받은 Gemini API 키를 입력하세요:", type="password")
