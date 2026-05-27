@@ -4,6 +4,8 @@ import google.generativeai as genai
 import time
 from datetime import datetime
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import numpy as np
 
 # 1. 화면 설정 및 폰트 강제 통일
 st.set_page_config(layout="wide") 
@@ -13,10 +15,24 @@ st.markdown("""
     html, body, [class*="css"] {
         font-family: 'Pretendard', sans-serif !important;
     }
+    .report-box {
+        background-color: #f8f9fa;
+        padding: 20px;
+        border-radius: 10px;
+        border: 1px solid #e9ecef;
+    }
+    a {
+        color: #1E88E5 !important;
+        text-decoration: none;
+        font-weight: 500;
+    }
+    a:hover {
+        text-decoration: underline;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("📊 주식 분석 대시보드")
+st.title("📊 AI 퀀트 주식 분석 대시보드 (Ultimate)")
 st.markdown("---")
 
 # 2. 상태 저장소 초기화
@@ -64,19 +80,18 @@ force_refresh = st.session_state.force_refresh
 
 # 5. 분석 및 화면 출력 로직
 if target_ticker:
-    # 이미 저장된 데이터가 있고 갱신 요청이 아닐 때 (캐시 불러오기)
     if target_ticker in st.session_state.saved_reports and not force_refresh:
         st.success(f"📌 임시 보관함에서 {target_ticker} 데이터를 불러왔습니다. (데이터 기준: {st.session_state.saved_reports[target_ticker]['time']})")
         report_data = st.session_state.saved_reports[target_ticker]
         
-        # 핵심 지표 출력
-        col1, col2, col3, col4 = st.columns(4)
+        # [수정] 핵심 지표 5개로 확장 (EPS 추가)
+        col1, col2, col3, col4, col5 = st.columns(5)
         col1.metric("현재 주가", f"${report_data['price']:.2f}")
-        col2.metric("PER (주가수익비율)", report_data['pe'])
-        col3.metric("20일 이동평균", f"${report_data['ma20']:.2f}")
-        col4.metric("RSI (투자심리)", f"{report_data['rsi']:.1f}")
+        col2.metric("PER (수익비율)", report_data['pe'])
+        col3.metric("EPS (주당순이익)", report_data['eps'])
+        col4.metric("20일 이동평균", f"${report_data['ma20']:.2f}")
+        col5.metric("RSI (투자심리)", f"{report_data['rsi']:.1f}")
         
-        # 차트 2개 나란히 출력
         st.markdown("<br>", unsafe_allow_html=True)
         chart_col1, chart_col2 = st.columns(2)
         with chart_col1:
@@ -84,7 +99,6 @@ if target_ticker:
         with chart_col2:
             st.plotly_chart(report_data['gauge_chart'], use_container_width=True)
         
-        # 뉴스 및 AI 보고서 출력
         st.markdown("---")
         news_col, report_col = st.columns([1, 2])
         
@@ -94,17 +108,16 @@ if target_ticker:
                 st.markdown(f"- [{news['title']}]({news['link']})")
             
         with report_col:
-            st.subheader("🤖 AI 보고서")
-            with st.container(border=True): # 깔끔한 테두리 박스 적용
+            st.subheader("🤖 AI 퀀트 심층 보고서")
+            with st.container(border=True): 
                 st.write(report_data['ai_report'])
 
-    # 새로 API를 호출하여 분석해야 할 때
     else:
         if not api_key:
             st.warning("API 키를 입력해 주세요.")
         else:
             try:
-                st.info(f"{target_ticker} 실시간 데이터를 수집하고 AI 분석을 진행합니다. 잠시만 기다려주세요...")
+                st.info(f"{target_ticker} 실시간 데이터를 수집하고 AI 심층 분석을 진행합니다. 잠시만 기다려주세요...")
                 time.sleep(0.5)
                 stock = yf.Ticker(target_ticker)
                 hist = stock.history(period="3mo")
@@ -118,6 +131,10 @@ if target_ticker:
                     pe_raw = info.get('trailingPE', info.get('forwardPE'))
                     pe_ratio = f"{pe_raw:.2f}" if pe_raw else "N/A"
                     
+                    # [신규] EPS 데이터 추출
+                    eps_raw = info.get('trailingEps', info.get('forwardEps'))
+                    eps_value = f"${eps_raw:.2f}" if eps_raw else "N/A"
+                    
                     ma20 = hist['Close'].rolling(window=20).mean().iloc[-1]
                     delta = hist['Close'].diff()
                     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
@@ -126,7 +143,11 @@ if target_ticker:
                     rsi = 100 - (100 / (1 + rs))
                     current_rsi = rsi.iloc[-1]
                     
-                    # [버그 수정 1] 절대 실패하지 않는 뉴스 링크 조립 로직
+                    # [신규] 거래량 상태 분석
+                    current_volume = hist['Volume'].iloc[-1]
+                    avg_volume = hist['Volume'].mean()
+                    volume_status = "급증" if current_volume > avg_volume * 1.5 else ("감소" if current_volume < avg_volume * 0.8 else "평이")
+                    
                     news_list = stock.news
                     news_data_for_ui = [] 
                     if news_list:
@@ -139,23 +160,32 @@ if target_ticker:
                                 title = news['content']['title']
                                 if 'link' in news['content']: link = news['content']['link']
                             
-                            # 링크가 비정상적일 경우 완벽한 절대 주소로 강제 변환
                             if not link.startswith('http'):
-                                if link.startswith('/'):
-                                    link = f"https://finance.yahoo.com{link}"
-                                else:
-                                    link = f"https://finance.yahoo.com/quote/{target_ticker}/news"
-                                    
+                                if link.startswith('/'): link = f"https://finance.yahoo.com{link}"
+                                else: link = f"https://finance.yahoo.com/quote/{target_ticker}/news"
                             news_data_for_ui.append({"title": title, "link": link})
                             
                     raw_headlines_text = "\n".join([f"- {n['title']}" for n in news_data_for_ui])
                     
-                    # 라인 차트 생성
-                    line_fig = go.Figure()
-                    line_fig.add_trace(go.Scatter(x=hist.index, y=hist['Close'], mode='lines', name='주가', line=dict(color='#1E88E5', width=2)))
-                    line_fig.update_layout(title="📈 최근 3개월 주가 흐름", margin=dict(l=0, r=0, t=40, b=0), font=dict(family="Pretendard"), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+                    # [신규] 2단 분할 차트 생성 (주가+추세선 / 거래량)
+                    line_fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
                     
-                    # 게이지 차트 생성
+                    # 1. 주가 선 (상단)
+                    line_fig.add_trace(go.Scatter(x=hist.index, y=hist['Close'], mode='lines', name='주가', line=dict(color='#1E88E5', width=2)), row=1, col=1)
+                    
+                    # 2. 선형 회귀 추세선 (상단)
+                    x_data = np.arange(len(hist))
+                    y_data = hist['Close'].values
+                    z = np.polyfit(x_data, y_data, 1)
+                    p = np.poly1d(z)
+                    line_fig.add_trace(go.Scatter(x=hist.index, y=p(x_data), mode='lines', name='추세선', line=dict(color='#EF5350', width=2, dash='dot')), row=1, col=1)
+                    
+                    # 3. 거래량 바 차트 (하단) - 전일 대비 등락에 따라 색상 변경
+                    vol_colors = ['#EF5350' if row['Open'] > row['Close'] else '#26A69A' for index, row in hist.iterrows()]
+                    line_fig.add_trace(go.Bar(x=hist.index, y=hist['Volume'], name='거래량', marker_color=vol_colors), row=2, col=1)
+                    
+                    line_fig.update_layout(title="📈 최근 3개월 주가 흐름 및 거래량", margin=dict(l=0, r=0, t=40, b=0), font=dict(family="Pretendard"), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", showlegend=False)
+                    
                     gauge_fig = go.Figure(go.Indicator(
                         mode = "gauge+number",
                         value = current_rsi,
@@ -169,43 +199,47 @@ if target_ticker:
                     ))
                     gauge_fig.update_layout(margin=dict(l=20, r=20, t=40, b=20), font=dict(family="Pretendard"))
                     
-                    # [버그 수정 2] 내용의 깊이를 살린 심층 프롬프트
+                    # [수정] 프롬프트에 EPS 및 거래량 데이터 주입
                     genai.configure(api_key=api_key)
                     model_name = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods][0]
                     model = genai.GenerativeModel(model_name)
                     
                     prompt = f"""
                     너는 월스트리트 최고의 시니어 퀀트 애널리스트야.
-                    [실제 데이터] 종목: {target_ticker} / 현재가: ${current_price:.2f} / 20일 이평선: ${ma20:.2f} / RSI: {current_rsi:.1f}
+                    [실제 데이터] 
+                    - 종목: {target_ticker} / 현재가: ${current_price:.2f} 
+                    - 펀더멘털: EPS {eps_value} / PER {pe_ratio}
+                    - 기술적 지표: 20일 이평선 ${ma20:.2f} / RSI {current_rsi:.1f}
+                    - 거래량 상태: 최근 평균 대비 [{volume_status}] 상태
                     [최근 뉴스]: {raw_headlines_text}
 
                     위 데이터를 종합하여 초보자도 이해하기 쉽지만, 내용의 깊이가 있는 전문가 수준의 투자 리포트를 작성해.
-                    가독성을 위해 반드시 아래의 양식과 [글머리 기호(-)]를 사용하여 구조화된 형태로 작성할 것. (절대 줄글로 대충 쓰지 마)
+                    가독성을 위해 반드시 아래의 양식과 [글머리 기호(-)]를 사용하여 구조화된 형태로 작성할 것.
 
                     ### 1. 📈 기술적 지표 심층 분석
-                    - 20일 이동평균선과 현재가를 비교하여 현재 추세의 강도와 지지/저항선을 상세히 분석해.
-                    - RSI 수치를 바탕으로 현재 매수/매도 압력이 어떤지, 단기 변동성이 어떻게 될지 예측해.
+                    - 추세(이평선)와 투자심리(RSI)를 분석해.
+                    - 최근 거래량의 변화({volume_status})가 주가의 상승/하락 신호에 어떤 의미를 주는지 해석해.
 
                     ### 2. 🌡️ 펀더멘털 및 시장 모멘텀
-                    - 제공된 최신 뉴스를 종합하여 현재 시장이 이 기업을 어떻게 평가하고 있는지 분석해.
-                    - 단기적인 호재/악재를 명확히 판별하고 향후 예상되는 주가 촉매제(Catalyst)를 적어줘.
+                    - 기업의 수익성(EPS/PER)을 평가하고 현재 가격이 합리적인지 분석해.
+                    - 제공된 뉴스를 바탕으로 한 단기 호재/악재와 향후 촉매제를 적어줘.
 
                     ### 3. 🎯 월스트리트 AI 최종 투자 전략
                     - **전략 방향:** (적극 매수 / 분할 매수 / 관망 / 분할 매도 / 적극 매도 중 1개 선택)
-                    - **목표 매수가:** $000 ~ $000 (구체적인 진입 권장 구간)
-                    - **목표 매도가:** $000 ~ $000 (구체적인 청산 권장 구간)
+                    - **목표 매수가:** $000 ~ $000
+                    - **목표 매도가:** $000 ~ $000
                     - **핵심 요약:** (현재 상황에 대한 전문가의 통찰력 있는 1~2줄 평)
                     """
                     
                     response = model.generate_content(prompt)
                     ai_report = response.text
                     
-                    # 데이터 세션 저장
                     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     st.session_state.saved_reports[target_ticker] = {
                         'time': current_time,
                         'price': current_price,
                         'pe': pe_ratio,
+                        'eps': eps_value,
                         'ma20': ma20,
                         'rsi': current_rsi,
                         'news': news_data_for_ui,
@@ -214,7 +248,6 @@ if target_ticker:
                         'ai_report': ai_report
                     }
                     
-                    # [버그 수정 3] 저장이 끝나면 화면을 즉시 새로고침하여 사이드바에 즉시 반영
                     st.session_state.force_refresh = False
                     st.rerun()
 
